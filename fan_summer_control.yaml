@@ -1,0 +1,125 @@
+blueprint:
+  name: "Ventilateur - Gestion Été avec présence et délai"
+  description: >
+    Active ou ajuste automatiquement un ventilateur selon la température intérieure,
+    la présence dans la maison et un délai minimum entre deux changements.
+  domain: automation
+  input:
+    fan_entity:
+      name: Ventilateur
+      selector:
+        entity:
+          domain: fan
+    input_datetime_entity:
+      name: Input Datetime de suivi
+      selector:
+        entity:
+          domain: input_datetime
+    presence_entity:
+      name: Capteur de présence
+      selector:
+        entity:
+          domain: binary_sensor
+    temperature_sensor:
+      name: Capteur de température intérieure
+      selector:
+        entity:
+          domain: sensor
+
+trigger:
+  - platform: state
+    entity_id: !input temperature_sensor
+  - platform: state
+    entity_id: !input presence_entity
+
+condition:
+  - condition: state
+    entity_id: sensor.season
+    state: "summer"
+  - condition: state
+    entity_id: !input presence_entity
+    state: "on"
+
+variables:
+  temp_sensor_id: !input temperature_sensor
+  input_dt_id: !input input_datetime_entity
+  fan_id: !input fan_entity
+  now_ts: "{{ as_timestamp(now()) }}"
+  temp_int: "{{ states(temp_sensor_id) | float(0) }}"
+  last_changed_ts: >
+    {% set val = states(input_dt_id) %}
+    {% if val != 'unknown' %}
+      {{ as_timestamp(val) }}
+    {% else %}
+      0
+    {% endif %}
+  min_delay: 600
+  can_change: "{{ (now_ts - last_changed_ts) > min_delay }}"
+
+action:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ can_change }}"
+          - condition: template
+            value_template: "{{ temp_int > 28 }}"
+        sequence:
+          - service: fan.turn_on
+            target: { entity_id: "{{ fan_id }}" }
+          - service: fan.set_preset_mode
+            target: { entity_id: "{{ fan_id }}" }
+            data: { preset_mode: speed_3 }
+          - service: fan.oscillate
+            target: { entity_id: "{{ fan_id }}" }
+            data: { oscillating: true }
+          - service: input_datetime.set_datetime
+            target: { entity_id: "{{ input_dt_id }}" }
+            data: { timestamp: "{{ now_ts }}" }
+
+      - conditions:
+          - condition: template
+            value_template: "{{ can_change }}"
+          - condition: template
+            value_template: "{{ temp_int > 25 and temp_int <= 28 }}"
+        sequence:
+          - service: fan.turn_on
+            target: { entity_id: "{{ fan_id }}" }
+          - service: fan.set_preset_mode
+            target: { entity_id: "{{ fan_id }}" }
+            data: { preset_mode: speed_2 }
+          - service: fan.oscillate
+            target: { entity_id: "{{ fan_id }}" }
+            data: { oscillating: true }
+          - service: input_datetime.set_datetime
+            target: { entity_id: "{{ input_dt_id }}" }
+            data: { timestamp: "{{ now_ts }}" }
+
+      - conditions:
+          - condition: template
+            value_template: "{{ can_change }}"
+          - condition: template
+            value_template: "{{ temp_int > 22 and temp_int <= 25 }}"
+        sequence:
+          - service: fan.turn_on
+            target: { entity_id: "{{ fan_id }}" }
+          - service: fan.set_preset_mode
+            target: { entity_id: "{{ fan_id }}" }
+            data: { preset_mode: natural }
+          - service: fan.oscillate
+            target: { entity_id: "{{ fan_id }}" }
+            data: { oscillating: true }
+          - service: input_datetime.set_datetime
+            target: { entity_id: "{{ input_dt_id }}" }
+            data: { timestamp: "{{ now_ts }}" }
+
+      - conditions:
+          - condition: template
+            value_template: "{{ can_change }}"
+          - condition: template
+            value_template: "{{ temp_int <= 22 }}"
+        sequence:
+          - service: fan.turn_off
+            target: { entity_id: "{{ fan_id }}" }
+          - service: input_datetime.set_datetime
+            target: { entity_id: "{{ input_dt_id }}" }
+            data: { timestamp: "{{ now_ts }}" }
